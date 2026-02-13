@@ -14,7 +14,7 @@ const io = new Server(server, {
 const port = process.env.PORT || 3000;
 const RES_WIDTH = 1280;
 const RES_HEIGHT = 720;
-const tick = parseInt(process.env.TICK, 10) || 60;
+const tick = parseInt(process.env.TICK, 10) || 120;
 
 // Serve static files
 
