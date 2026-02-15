@@ -10,13 +10,14 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: "*" },
+  // Reduce socket.io overhead
+  pingInterval: 10000,
+  pingTimeout: 5000,
+  perMessageDeflate: false, // Compression adds CPU cost
 });
 
-// Serve static files
-app.use(express.static(path.join(__dirname, "public")));
-
 // Interaction constants
-const port = process.env.PORT || 3000;
+const port = parseInt(process.env.PORT) || 3000;
 const RES_WIDTH = 1280;
 const RES_HEIGHT = 720;
 const tick = parseInt(process.env.TICK, 10) || 60;
@@ -24,6 +25,7 @@ const tick = parseInt(process.env.TICK, 10) || 60;
 // Game constants
 let playerID = {};
 let players = {};
+let playerCount = 0; // Track count directly instead of Object.keys().length
 const gravity = 0.5;
 const jumpPower = -15;
 const RESPAWN_X = 330;
@@ -88,6 +90,73 @@ const world = {
   ping: "World Received",
 };
 
+// ============== SPATIAL GRID FOR PLATFORM COLLISIONS ==============
+// Pre-compute which platforms occupy which grid cells
+const GRID_CELL_SIZE = 80;
+const GRID_COLS = Math.ceil(RES_WIDTH / GRID_CELL_SIZE);
+const GRID_ROWS = Math.ceil(RES_HEIGHT / GRID_CELL_SIZE);
+const platformGrid = new Array(GRID_COLS * GRID_ROWS);
+
+function buildPlatformGrid() {
+  for (let i = 0; i < platformGrid.length; i++) {
+    platformGrid[i] = [];
+  }
+  for (let i = 0; i < world.platforms.length; i++) {
+    const p = world.platforms[i];
+    const startCol = Math.max(0, Math.floor(p.x / GRID_CELL_SIZE));
+    const endCol = Math.min(
+      GRID_COLS - 1,
+      Math.floor((p.x + p.width) / GRID_CELL_SIZE),
+    );
+    const startRow = Math.max(0, Math.floor(p.y / GRID_CELL_SIZE));
+    const endRow = Math.min(
+      GRID_ROWS - 1,
+      Math.floor((p.y + p.height) / GRID_CELL_SIZE),
+    );
+    for (let row = startRow; row <= endRow; row++) {
+      for (let col = startCol; col <= endCol; col++) {
+        platformGrid[row * GRID_COLS + col].push(world.platforms[i]);
+      }
+    }
+  }
+}
+buildPlatformGrid();
+
+function getNearbyPlatforms(player) {
+  const startCol = Math.max(0, Math.floor(player.x / GRID_CELL_SIZE));
+  const endCol = Math.min(
+    GRID_COLS - 1,
+    Math.floor((player.x + player.width) / GRID_CELL_SIZE),
+  );
+  const startRow = Math.max(0, Math.floor(player.y / GRID_CELL_SIZE));
+  const endRow = Math.min(
+    GRID_ROWS - 1,
+    Math.floor((player.y + player.height) / GRID_CELL_SIZE),
+  );
+
+  // Use a Set-like approach to avoid duplicates without allocating a Set
+  const seen = getNearbyPlatforms._seen;
+  seen.length = 0;
+  const result = getNearbyPlatforms._result;
+  result.length = 0;
+
+  for (let row = startRow; row <= endRow; row++) {
+    for (let col = startCol; col <= endCol; col++) {
+      const cell = platformGrid[row * GRID_COLS + col];
+      for (let i = 0; i < cell.length; i++) {
+        const plat = cell[i];
+        if (seen.indexOf(plat) === -1) {
+          seen.push(plat);
+          result.push(plat);
+        }
+      }
+    }
+  }
+  return result;
+}
+getNearbyPlatforms._seen = [];
+getNearbyPlatforms._result = [];
+
 // Target
 const target = {
   x: Math.random() * 1280,
@@ -97,20 +166,27 @@ const target = {
   height: 10,
 };
 
-// Ensure target doesn't spawn inside a platform
+// ============== PRE-COMPUTE VALID TARGET SPAWN ZONES ==============
+// Instead of random retry loop, pre-compute valid Y ranges for each X slice
 function repositionTarget() {
   let validPosition = false;
   let attempts = 0;
 
-  while (!validPosition && attempts < 100) {
+  while (!validPosition && attempts < 50) {
     target.x = Math.random() * (RES_WIDTH - target.width);
     target.y = getRandomBetween(40, 250);
     validPosition = true;
     attempts++;
 
-    // Check against all platforms
-    for (const platform of world.platforms) {
-      if (isColliding(target, platform)) {
+    // Only check platforms that could overlap (quick AABB)
+    for (let i = 0; i < world.platforms.length; i++) {
+      const platform = world.platforms[i];
+      if (
+        target.x + target.width > platform.x &&
+        target.x < platform.x + platform.width &&
+        target.y + target.height > platform.y &&
+        target.y < platform.y + platform.height
+      ) {
         validPosition = false;
         break;
       }
@@ -118,21 +194,19 @@ function repositionTarget() {
   }
 }
 
-// Rate limiter for inputs
-const INPUT_RATE = 1000 / 120;
-let lastInputTime = {};
-
+// ============== OPTIMIZED INPUT HANDLING ==============
 io.on("connection", (socket) => {
-  // Limit max players
-  if (Object.keys(players).length >= MAX_PLAYERS) {
+  if (playerCount >= MAX_PLAYERS) {
     socket.emit("serverFull", "Server is full. Try again later.");
     socket.disconnect();
     return;
   }
 
   playerID[socket.id] = true;
+  playerCount++;
+
   players[socket.id] = {
-    id: socket.id, // Store ID on the player object for client-side identification
+    id: socket.id,
     x: RESPAWN_X,
     y: RESPAWN_Y,
     width: 20,
@@ -145,47 +219,32 @@ io.on("connection", (socket) => {
     name: "",
     score: 0,
     highScore: 0,
+    // Store input state on the player — process in game loop
+    inputLeft: false,
+    inputRight: false,
+    inputJump: false,
   };
 
   let curPlayer = players[socket.id];
-  lastInputTime[socket.id] = 0;
 
-  // Handle Inputs with rate limiting
-  socket.on("inputs", (input) => {
-    if (!input) return;
-    if (!players[socket.id]) return;
-
-    const now = Date.now();
-    if (now - lastInputTime[socket.id] < INPUT_RATE * 0.5) return;
-    lastInputTime[socket.id] = now;
-
-    // Reset horizontal velocity each frame
-    curPlayer.velocityX = 0;
-
-    if (input.left) {
-      curPlayer.velocityX = -curPlayer.speed;
-    }
-    if (input.right) {
-      curPlayer.velocityX = curPlayer.speed;
-    }
-    if (input.jump && curPlayer.isGrounded) {
-      curPlayer.velocityY = jumpPower;
-      curPlayer.isGrounded = false;
-    }
-  });
-
-  console.log(
-    `Connected: ${socket.id} | Players online: ${Object.keys(players).length}`,
-  );
-
+  console.log(`Connected: ${socket.id} | Players online: ${playerCount}`);
   socket.emit("init", world);
 
-  // Handle name with sanitization
+  // ============== STORE INPUTS, DON'T PROCESS IMMEDIATELY ==============
+  // This decouples input rate from physics rate
+  socket.on("inputs", (input) => {
+    if (!input || !curPlayer) return;
+
+    // Just store the input state — game loop will read it
+    curPlayer.inputLeft = !!input.left;
+    curPlayer.inputRight = !!input.right;
+    curPlayer.inputJump = !!input.jump;
+  });
+
   socket.on("name", (pName) => {
     if (!players[socket.id]) return;
     if (typeof pName !== "string") return;
 
-    // Sanitize name
     let sanitized = pName.trim().slice(0, 15);
     if (sanitized.length === 0) sanitized = "Player";
 
@@ -193,14 +252,16 @@ io.on("connection", (socket) => {
     console.log(`Player named: ${sanitized} (${socket.id})`);
   });
 
-  // On disconnect
   socket.on("disconnect", () => {
-    console.log(
-      `Disconnected: ${socket.id} (${curPlayer.name}) | Players online: ${Object.keys(players).length - 1}`,
-    );
-    delete playerID[socket.id];
-    delete players[socket.id];
-    delete lastInputTime[socket.id];
+    if (players[socket.id]) {
+      console.log(
+        `Disconnected: ${socket.id} (${curPlayer.name}) | Players online: ${playerCount - 1}`,
+      );
+      delete playerID[socket.id];
+      delete players[socket.id];
+      playerCount--;
+      curPlayer = null; // Prevent stale reference
+    }
   });
 });
 
@@ -221,12 +282,11 @@ function respawnPlayer(player) {
   player.velocityY = 0;
   player.isGrounded = false;
 
-  // Keep high score, reset current score
   if (player.score > player.highScore) {
     player.highScore = player.score;
   }
   player.score = 0;
-  console.log(`Player died: ${player.name}`);
+  // Removed console.log from hot path
 }
 
 function checkBounds(player) {
@@ -247,22 +307,25 @@ function checkBounds(player) {
   }
 }
 
+// Track score events to batch-send
+let pendingScoreEvents = [];
+
 function checkTargetCollision(player) {
   if (isColliding(player, target)) {
     player.score += 1;
     if (player.score > player.highScore) {
       player.highScore = player.score;
     }
-    repositionTarget();
-    console.log(`${player.name} scored! Total: ${player.score}`);
 
-    // Broadcast score event for effects
-    io.emit("scoreEvent", {
+    // Queue score event instead of emitting immediately
+    pendingScoreEvents.push({
       playerName: player.name,
       score: player.score,
       x: target.x,
       y: target.y,
     });
+
+    repositionTarget();
   }
 }
 
@@ -271,8 +334,6 @@ function applyGravity(player) {
   player.y += player.velocityY;
   player.x += player.velocityX;
 
-  // Assume not grounded until proven otherwise
-  let wasGrounded = player.isGrounded;
   player.isGrounded = false;
 
   // Ground collision
@@ -321,15 +382,36 @@ function checkPlatformCollision(player, platform) {
   }
 }
 
+// ============== PROCESS INPUTS IN GAME LOOP (not in socket handler) ==============
+function processInputs(player) {
+  player.velocityX = 0;
+
+  if (player.inputLeft) {
+    player.velocityX = -player.speed;
+  }
+  if (player.inputRight) {
+    player.velocityX = player.speed;
+  }
+  if (player.inputJump && player.isGrounded) {
+    player.velocityY = jumpPower;
+    player.isGrounded = false;
+  }
+}
+
 function updateGameState() {
   for (const playerId in players) {
-    let player = players[playerId];
+    const player = players[playerId];
 
+    // Process stored inputs
+    processInputs(player);
+
+    // Physics
     applyGravity(player);
 
-    // Use different variable name to avoid shadowing
-    for (let i = 0; i < world.platforms.length; i++) {
-      checkPlatformCollision(player, world.platforms[i]);
+    // Platform collisions — use spatial grid
+    const nearby = getNearbyPlatforms(player);
+    for (let i = 0; i < nearby.length; i++) {
+      checkPlatformCollision(player, nearby[i]);
     }
 
     checkBounds(player);
@@ -337,16 +419,124 @@ function updateGameState() {
   }
 }
 
-// Game loop
+// ============== SEND ONLY WHAT THE CLIENT NEEDS ==============
+// Build a slim payload instead of sending full player objects
+function buildClientState() {
+  const slimPlayers = {};
+  for (const id in players) {
+    const p = players[id];
+    slimPlayers[id] = {
+      id: p.id,
+      x: p.x,
+      y: p.y,
+      width: p.width,
+      height: p.height,
+      color: p.color,
+      velocityX: p.velocityX,
+      velocityY: p.velocityY,
+      name: p.name,
+      score: p.score,
+      // Don't send: speed, isGrounded, highScore, inputLeft, inputRight, inputJump
+    };
+  }
+  return slimPlayers;
+}
+
+// ============== DELTA COMPRESSION: only send changed data ==============
+let lastSentState = {};
+let fullSyncCounter = 0;
+
+function buildDeltaState() {
+  const delta = {};
+  let hasChanges = false;
+
+  for (const id in players) {
+    const p = players[id];
+    const last = lastSentState[id];
+
+    // New player or significant change
+    if (
+      !last ||
+      Math.abs(p.x - last.x) > 0.5 ||
+      Math.abs(p.y - last.y) > 0.5 ||
+      p.score !== last.score ||
+      p.name !== last.name
+    ) {
+      delta[id] = {
+        id: p.id,
+        x: Math.round(p.x * 10) / 10, // Reduce precision for smaller packets
+        y: Math.round(p.y * 10) / 10,
+        width: p.width,
+        height: p.height,
+        color: p.color,
+        velocityX: Math.round(p.velocityX * 10) / 10,
+        velocityY: Math.round(p.velocityY * 10) / 10,
+        name: p.name,
+        score: p.score,
+      };
+      hasChanges = true;
+    }
+  }
+
+  // Check for removed players
+  for (const id in lastSentState) {
+    if (!players[id]) {
+      delta[id] = null; // Signal removal
+      hasChanges = true;
+    }
+  }
+
+  return hasChanges ? delta : null;
+}
+
+function cacheCurrentState() {
+  lastSentState = {};
+  for (const id in players) {
+    const p = players[id];
+    lastSentState[id] = {
+      x: p.x,
+      y: p.y,
+      score: p.score,
+      name: p.name,
+    };
+  }
+}
+
+// ============== GAME LOOP ==============
 setInterval(() => {
   updateGameState();
-  io.emit("gameState", { target, players });
+
+  fullSyncCounter++;
+
+  // Every 2 seconds, send full state to handle any desync
+  if (fullSyncCounter >= tick * 2) {
+    fullSyncCounter = 0;
+    const fullState = buildClientState();
+    io.emit("gameState", { target, players: fullState, full: true });
+    cacheCurrentState();
+  } else {
+    // Otherwise send delta only
+    const delta = buildDeltaState();
+    if (delta) {
+      io.emit("gameState", { target, players: delta });
+      cacheCurrentState();
+    }
+    // If nothing changed, send nothing!
+  }
+
+  // Send queued score events
+  if (pendingScoreEvents.length > 0) {
+    for (let i = 0; i < pendingScoreEvents.length; i++) {
+      io.emit("scoreEvent", pendingScoreEvents[i]);
+    }
+    pendingScoreEvents.length = 0;
+  }
 }, 1000 / tick);
 
 // Server status endpoint
 app.get("/status", (req, res) => {
   res.json({
-    players: Object.keys(players).length,
+    players: playerCount,
     maxPlayers: MAX_PLAYERS,
     uptime: process.uptime(),
   });
