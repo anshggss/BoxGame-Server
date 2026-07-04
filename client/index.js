@@ -120,7 +120,7 @@ joinRoomBtn.addEventListener("click", async () => {
       return;
     }
 
-    const { hostIp, port, roomID } = res.json();
+    const { hostIp, port, roomID } = await res.json();
 
     if (!hostIp || !port || !roomID) {
       showLobbyError("Could not locate room server.");
