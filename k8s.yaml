@@ -211,18 +211,30 @@ kind: Service
 metadata:
   name: gateway-svc
   namespace: box-game
-  labels:
-    app: gateway
 spec:
   selector:
     app: gateway
   ports:
-    - port: 80
+    - port: 3000
       targetPort: 3000
       protocol: TCP
-      name: http
-  # ClusterIP: Nginx Ingress handles external TLS termination for gateway.boxgame.shadyggs.xyz
   type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-nodeport
+  namespace: box-game
+spec:
+  type: NodePort
+  selector:
+    app: gateway
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      nodePort: 31000
 
 ---
 # =============================================================================
@@ -323,13 +335,6 @@ spec:
                   fieldPath: status.hostIP
             - name: SERVER_MANAGER_URL
               value: "http://server-manager-svc.box-game.svc.cluster.local:4689"
-          env:
-            - name: HOST_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.hostIP
-            - name: SERVER_MANAGER_URL
-              value: "http://server-manager-svc.box-game.svc.cluster.local:4689"
             - name: PORT_MIN
               value: "30000"
             - name: PORT_MAX
@@ -406,4 +411,4 @@ spec:
               service:
                 name: gateway-svc
                 port:
-                  number: 80
+                  number: 3000
