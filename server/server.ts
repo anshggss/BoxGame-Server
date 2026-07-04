@@ -462,6 +462,21 @@ io.on("connection", (socket) => {
     socket.join(code);
 
     const sanitized = sanitizeName(playerName);
+
+    // Initialize the room if it doesn't exist yet
+    if (!rooms[code]) {
+      const target: Target = { x: 0, y: 0, width: 30, height: 30 };
+      repositionTarget(target);
+      rooms[code] = {
+        players: {},
+        playerCount: 0,
+        target,
+        lastSentState: {},
+        fullSyncCounter: 0,
+        pendingScoreEvents: [],
+      };
+    }
+
     rooms[code].players[socket.id] = makePlayer(socket.id, sanitized);
     rooms[code].playerCount++;
 
