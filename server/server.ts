@@ -1,3 +1,4 @@
+import { type Request, type Response } from "express";
 import express from "express";
 import http from "http";
 import { AddressInfo } from "net";
@@ -461,6 +462,21 @@ io.on("connection", (socket) => {
     socket.join(code);
 
     const sanitized = sanitizeName(playerName);
+
+    // Initialize the room if it doesn't exist yet
+    if (!rooms[code]) {
+      const target: Target = { x: 0, y: 0, width: 30, height: 30 };
+      repositionTarget(target);
+      rooms[code] = {
+        players: {},
+        playerCount: 0,
+        target,
+        lastSentState: {},
+        fullSyncCounter: 0,
+        pendingScoreEvents: [],
+      };
+    }
+
     rooms[code].players[socket.id] = makePlayer(socket.id, sanitized);
     rooms[code].playerCount++;
 
@@ -611,26 +627,84 @@ function makePlayer(id: string, name: string) {
 }
 
 // Status endpoint
-app.get("/status", () => {
-  console.log("Server is upppp");
+app.get("/status", (req: Request, res: Response) => {
+  res.sendStatus(200);
 });
 
-server.listen(0, async () => {
-  const address = server.address() as AddressInfo;
-  const serverInfo = {
-    hostIp: process.env.HOST_IP,
-    port: address.port,
-    connections: 0,
-  };
+// ============== PORT SELECTION ==============
+// In production, game-server pods must listen on a port within PORT_MIN–PORT_MAX
+// so that the host Nginx stream proxy (which terminates TLS for
+// wss://server.boxgame.shadyggs.xyz:<port>) can forward the traffic.
+// In local dev, PORT_MIN / PORT_MAX are unset → falls back to listen(0).
+const PORT_MIN = process.env.PORT_MIN ? parseInt(process.env.PORT_MIN) : 0;
+const PORT_MAX = process.env.PORT_MAX ? parseInt(process.env.PORT_MAX) : 0;
 
-  await fetch(`${process.env.SERVER_MANAGER_URL}/register`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(serverInfo),
+function pickPort(): number {
+  if (!PORT_MIN || !PORT_MAX) return 0;
+  const publicPort =
+    PORT_MIN + Math.floor(Math.random() * (PORT_MAX - PORT_MIN + 1));
+  return publicPort; // bind on the internal, offset port
+}
+async function startOnPort(port: number, retries = 20): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once("error", async (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE" && retries > 0) {
+        server.removeAllListeners("error");
+        const next = pickPort();
+        console.warn(`Port ${port} in use, trying ${next}…`);
+        await startOnPort(next, retries - 1)
+          .then(resolve)
+          .catch(reject);
+      } else {
+        reject(err);
+      }
+    });
+    server.listen(port, "127.0.0.1", resolve); // <-- bind loopback only
   });
+}
+startOnPort(pickPort())
+  .then(async () => {
+    const address = server.address() as AddressInfo;
+    const publicPort = address.port;
 
-  console.log(`Server running on http://localhost:${address.port}`);
-  console.log(`Tick rate: ${tick}`);
-});
+    const serverInfo = {
+      hostIp: process.env.HOST_IP,
+      port: publicPort, // <-- report the public-facing port, clients/nginx use this
+      connections: 0,
+    };
+    while (true) {
+      try {
+        console.log("SERVER_MANAGER_URL =", process.env.SERVER_MANAGER_URL);
+        console.log("HOST_IP =", process.env.HOST_IP);
+        console.log("Register payload =", serverInfo);
+        const response = await fetch(
+          `${process.env.SERVER_MANAGER_URL}/register`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(serverInfo),
+          },
+        );
+
+        if (!response.ok) {
+          throw new Error(`Registration failed: HTTP ${response.status}`);
+        }
+
+        console.log("Successfully registered with server-manager.");
+        break;
+      } catch (err) {
+        console.error("Registration failed, retrying in 2 seconds...", err);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+
+    console.log(`Server running on port ${address.port}`);
+    console.log(`Port range: ${PORT_MIN || "OS-assigned"}–${PORT_MAX || ""}`);
+    console.log(`Tick rate: ${tick}`);
+  })
+  .catch((err) => {
+    console.error("Unable to start HTTP server:", err);
+    process.exit(1);
+  });

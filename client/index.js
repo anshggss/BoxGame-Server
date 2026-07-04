@@ -2,8 +2,15 @@
 // GATEWAY_URL is injected by index.html as a <script> block so it works
 // both locally and on Vercel without a bundler.
 // Locally:  window.GATEWAY_URL = "http://localhost:3000"
-// Vercel:   window.GATEWAY_URL = "https://<your-vm-ip-or-domain>"
-const GATEWAY_URL = window.GATEWAY_URL || "http://localhost:3000";
+// Vercel:   window.GATEWAY_URL = "https://gateway.boxgame.shadyggs.xyz"
+const GATEWAY_URL = window.GATEWAY_URL;
+
+// In production the game-server domain is server.boxgame.shadyggs.xyz.
+// Nginx terminates TLS for wss://server.boxgame.shadyggs.xyz:<port> and
+// forwards to the hostNetwork pod on the same port.
+// In local dev the cookie will contain "localhost" so http:// is used.
+const isLocalDev = GATEWAY_URL.startsWith("http://");
+const WS_SCHEME = isLocalDev ? "http" : "wss";
 
 // socket is created lazily after a room is assigned so we know which
 // game-server host+port to connect to.
@@ -52,29 +59,24 @@ createRoomBtn.addEventListener("click", async () => {
   try {
     // Gateway picks the least-loaded game server, sets cookies
     // (hostIp, port, roomID) and returns.
-    const res = await fetch(`${GATEWAY_URL}/createRoom`, {
-      credentials: "include", // receive the Set-Cookie headers
-    });
-
+    const res = await fetch(`${GATEWAY_URL}/createRoom`);
     if (!res.ok) {
       showLobbyError("No game servers available. Try again.");
       setLobbyLoading(false);
       return;
     }
-
-    // Read the cookies the gateway just set
-    const hostIp = getCookie("hostIp");
-    const port = getCookie("port");
-    const roomID = getCookie("roomID");
-
+    console.log("Logging res:");
+    console.log(res);
+    console.log("Logging hostIp and port");
+    const { hostIp, port, roomID } = await res.json();
+    console.log(`hostIp: ${hostIp}, port: ${port}`);
     if (!hostIp || !port || !roomID) {
       showLobbyError("Server response missing. Try again.");
       setLobbyLoading(false);
       return;
     }
-
-    // Connect socket directly to the assigned game-server
-    connectSocket(`http://${hostIp}:${port}`, () => {
+    // Connect socket directly to the assigned game-server via TLS in prod
+    connectSocket(`${WS_SCHEME}://${hostIp}:${port}`, () => {
       socket.emit("createRoom", pName, roomID, (ack) => {
         setLobbyLoading(false);
         if (ack && ack.success) {
@@ -118,17 +120,17 @@ joinRoomBtn.addEventListener("click", async () => {
       return;
     }
 
-    const hostIp = getCookie("hostIp");
-    const port = getCookie("port");
+    const { hostIp, port, roomID } = await res.json();
+    console.log(hostIp);
 
-    if (!hostIp || !port) {
+    if (!hostIp || !port || !roomID) {
       showLobbyError("Could not locate room server.");
       setLobbyLoading(false);
       return;
     }
 
-    connectSocket(`http://${hostIp}:${port}`, () => {
-      socket.emit("joinRoom", { name: pName, code }, (ack) => {
+    connectSocket(`${WS_SCHEME}://${hostIp}:${port}`, () => {
+      socket.emit("joinRoom", { name: pName, roomID }, (ack) => {
         setLobbyLoading(false);
         if (ack && ack.success) {
           enterGame(ack.code);

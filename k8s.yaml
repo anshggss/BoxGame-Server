@@ -176,7 +176,15 @@ spec:
               value: "3000"
             # Talk to server-manager inside the cluster
             - name: SERVER_MANAGER_URL
-              value: "http://server-manager-svc.box-game.svc.cluster.local:4689"
+              value: "http://10.99.57.238:4689"
+            # Origin allowed by CORS – must match the Vercel deployment URL.
+            # Update this to your exact Vercel URL after first deploy.
+            - name: ALLOWED_ORIGIN
+              value: "https://boxgame.shadyggs.xyz"
+            # Public domain that clients use to reach game-server pods over wss://.
+            # Nginx stream on the VM terminates TLS and forwards to the pod port.
+            - name: SERVER_HOST_DOMAIN
+              value: "server.boxgame.shadyggs.xyz"
           readinessProbe:
             httpGet:
               path: /healthz
@@ -203,18 +211,30 @@ kind: Service
 metadata:
   name: gateway-svc
   namespace: box-game
-  labels:
-    app: gateway
 spec:
   selector:
     app: gateway
   ports:
-    - port: 80
+    - port: 3000
       targetPort: 3000
       protocol: TCP
-      name: http
-  # Change to LoadBalancer if your cluster is on a cloud provider
-  type: LoadBalancer
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-nodeport
+  namespace: box-game
+spec:
+  type: NodePort
+  selector:
+    app: gateway
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      nodePort: 31000
 
 ---
 # =============================================================================
@@ -256,6 +276,14 @@ data:
                   fieldPath: status.hostIP
             - name: SERVER_MANAGER_URL
               value: "http://server-manager-svc.box-game.svc.cluster.local:4689"
+            # Port range for game-server sockets.
+            # Nginx stream on the host forwards this range with TLS so that
+            # the browser can open wss://server.boxgame.shadyggs.xyz:<port>.
+            # Ensure these ports are open in the VM firewall (ufw / iptables).
+            - name: PORT_MIN
+              value: "30000"
+            - name: PORT_MAX
+              value: "31000"
           resources:
             requests:
               cpu: "200m"
@@ -306,8 +334,12 @@ spec:
                 fieldRef:
                   fieldPath: status.hostIP
             - name: SERVER_MANAGER_URL
-              value: "http://server-manager-svc.box-game.svc.cluster.local:4689"
-          # No fixed containerPort – the server calls listen(0) for a random port
+              value: "http://10.99.57.238:4689"
+            - name: PORT_MIN
+              value: "30000"
+            - name: PORT_MAX
+              value: "31000"
+          # No fixed containerPort – the server picks a port in [PORT_MIN, PORT_MAX]
           resources:
             requests:
               cpu: "200m"
@@ -315,3 +347,68 @@ spec:
             limits:
               cpu: "1000m"
               memory: "512Mi"
+
+---
+# =============================================================================
+# CERT-MANAGER – ClusterIssuer (Let's Encrypt)
+# =============================================================================
+# Prerequisites (run once on the VM):
+#   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+# =============================================================================
+
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # Replace with your real email – Let's Encrypt sends expiry warnings here.
+    email: admin@boxgame.shadyggs.xyz
+    privateKeySecretRef:
+      name: letsencrypt-prod-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+
+---
+# =============================================================================
+# NGINX INGRESS – gateway.boxgame.shadyggs.xyz → HTTPS
+# =============================================================================
+# Prerequisites (run once on the VM, kubeadm):
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.1/deploy/static/provider/baremetal/deploy.yaml
+# Then patch it to use host ports 80/443:
+#   kubectl patch svc ingress-nginx-controller -n ingress-nginx \
+#     -p '{"spec":{"type":"NodePort","externalTrafficPolicy":"Local"}}'
+# =============================================================================
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gateway-ingress
+  namespace: box-game
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Required for Socket.IO long-polling fallback (not used, but safe to have)
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  tls:
+    - hosts:
+        - gateway.boxgame.shadyggs.xyz
+      secretName: gateway-tls
+  rules:
+    - host: gateway.boxgame.shadyggs.xyz
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway-svc
+                port:
+                  number: 3000

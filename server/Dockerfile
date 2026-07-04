@@ -13,7 +13,7 @@ RUN npx tsc --target ES2020 --module commonjs --esModuleInterop true \
     --resolveJsonModule true --skipLibCheck true --outDir dist server.ts
 
 # ---- Runtime stage ----
-FROM node:lts-alpine AS runtime
+FROM node:lts-slim AS runtime
 
 WORKDIR /app
 
