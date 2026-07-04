@@ -59,14 +59,13 @@ createRoomBtn.addEventListener("click", async () => {
   try {
     // Gateway picks the least-loaded game server, sets cookies
     // (hostIp, port, roomID) and returns.
-    const res = await fetch(`${GATEWAY_URL}/createRoom`, {
-      credentials: "include",
-    });
+    const res = await fetch(`${GATEWAY_URL}/createRoom`);
     if (!res.ok) {
       showLobbyError("No game servers available. Try again.");
       setLobbyLoading(false);
       return;
     }
+    console.log(res);
     const { hostIp, port, roomID } = await res.json();
     console.log(`hostIp: ${hostIp}, port: ${port}`);
     if (!hostIp || !port || !roomID) {
