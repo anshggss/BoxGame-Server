@@ -120,10 +120,9 @@ joinRoomBtn.addEventListener("click", async () => {
       return;
     }
 
-    const hostIp = getCookie("hostIp");
-    const port = getCookie("port");
+    const { hostIp, port, roomID } = res.json();
 
-    if (!hostIp || !port) {
+    if (!hostIp || !port || !roomID) {
       showLobbyError("Could not locate room server.");
       setLobbyLoading(false);
       return;
