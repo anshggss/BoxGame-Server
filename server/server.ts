@@ -1,3 +1,4 @@
+import { type Request, type Response } from "express";
 import express from "express";
 import http from "http";
 import { AddressInfo } from "net";
@@ -611,8 +612,8 @@ function makePlayer(id: string, name: string) {
 }
 
 // Status endpoint
-app.get("/status", () => {
-  console.log("Server is upppp");
+app.get("/status", (req: Request, res: Response) => {
+  res.sendStatus(200);
 });
 
 // ============== PORT SELECTION ==============
@@ -636,7 +637,9 @@ async function startOnPort(port: number, retries = 20): Promise<void> {
         server.removeAllListeners("error");
         const next = pickPort();
         console.warn(`Port ${port} in use, trying ${next}…`);
-        await startOnPort(next, retries - 1).then(resolve).catch(reject);
+        await startOnPort(next, retries - 1)
+          .then(resolve)
+          .catch(reject);
       } else {
         reject(err);
       }
@@ -644,25 +647,49 @@ async function startOnPort(port: number, retries = 20): Promise<void> {
     server.listen(port, resolve);
   });
 }
+startOnPort(pickPort())
+  .then(async () => {
+    const address = server.address() as AddressInfo;
 
-startOnPort(pickPort()).then(async () => {
-  const address = server.address() as AddressInfo;
-  const serverInfo = {
-    hostIp: process.env.HOST_IP,
-    port: address.port,
-    connections: 0,
-  };
+    const serverInfo = {
+      hostIp: process.env.HOST_IP,
+      port: address.port,
+      connections: 0,
+    };
 
-  await fetch(`${process.env.SERVER_MANAGER_URL}/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(serverInfo),
+    while (true) {
+      try {
+        console.log("SERVER_MANAGER_URL =", process.env.SERVER_MANAGER_URL);
+        console.log("HOST_IP =", process.env.HOST_IP);
+        console.log("Register payload =", serverInfo);
+        const response = await fetch(
+          `${process.env.SERVER_MANAGER_URL}/register`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(serverInfo),
+          },
+        );
+
+        if (!response.ok) {
+          throw new Error(`Registration failed: HTTP ${response.status}`);
+        }
+
+        console.log("Successfully registered with server-manager.");
+        break;
+      } catch (err) {
+        console.error("Registration failed, retrying in 2 seconds...", err);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+
+    console.log(`Server running on port ${address.port}`);
+    console.log(`Port range: ${PORT_MIN || "OS-assigned"}–${PORT_MAX || ""}`);
+    console.log(`Tick rate: ${tick}`);
+  })
+  .catch((err) => {
+    console.error("Unable to start HTTP server:", err);
+    process.exit(1);
   });
-
-  console.log(`Server running on port ${address.port}`);
-  console.log(`Port range: ${PORT_MIN || "OS-assigned"}–${PORT_MAX || ""}`);
-  console.log(`Tick rate: ${tick}`);
-}).catch((err) => {
-  console.error("Failed to bind to any port:", err);
-  process.exit(1);
-});

@@ -3,7 +3,7 @@
 // both locally and on Vercel without a bundler.
 // Locally:  window.GATEWAY_URL = "http://localhost:3000"
 // Vercel:   window.GATEWAY_URL = "https://gateway.boxgame.shadyggs.xyz"
-const GATEWAY_URL = window.GATEWAY_URL || "http://localhost:3000";
+const GATEWAY_URL = window.GATEWAY_URL;
 
 // In production the game-server domain is server.boxgame.shadyggs.xyz.
 // Nginx terminates TLS for wss://server.boxgame.shadyggs.xyz:<port> and

@@ -9,7 +9,11 @@ app.use(express.json());
 // Allow the client origin to send credentials (cookies).
 // Locally:   ALLOWED_ORIGIN=http://localhost:5500  (or omit for *)
 // On Vercel: ALLOWED_ORIGIN=https://your-app.vercel.app
-const allowedOrigin = process.env.ALLOWED_ORIGIN || "http://localhost:5500";
+const allowedOrigin = [
+  "https://gateway.boxgame.shadyggs.xyz",
+  "http://localhost:4689",
+  "https://boxgame.shadyggs.xyz",
+];
 
 app.use(
   cors({

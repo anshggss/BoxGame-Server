@@ -3,15 +3,9 @@ import express from "express";
 import assignServer from "./routes/assignServer";
 import Heap from "./helper/heap";
 import handleRegister from "./routes/handleRegister";
-import cors from "cors";
 import { type Request, type Response } from "express";
 
 const app = express();
-app.use(
-  cors({
-    credentials: true,
-  }),
-);
 const port = process.env.PORT || 4689;
 app.use(express.json());
 
@@ -23,7 +17,7 @@ app.get("/health", (req: Request, res: Response) => {
   res.status(200).send("Yooo we're up");
 });
 
-app.listen(port, () => {
+app.listen({ port: Number(port), host: "0.0.0.0" }, () => {
   console.log(`Server listening on http://localhost:${port}`);
 });
 

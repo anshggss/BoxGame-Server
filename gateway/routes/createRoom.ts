@@ -13,8 +13,26 @@ const COOKIE_OPTS = {
 // The public hostname clients use to reach game-server pods.
 // Set SERVER_HOST_DOMAIN=server.boxgame.shadyggs.xyz in production.
 // The raw pod IP (hostNetwork) is unreachable from the browser.
-const SERVER_HOST_DOMAIN =
-  process.env.SERVER_HOST_DOMAIN || "localhost";
+
+async function fetchWithRetry(url: string, retries = 30) {
+  while (retries--) {
+    try {
+      const res = await fetch(url);
+
+      if (res.ok) {
+        return res;
+      }
+    } catch (err) {
+      console.error(err);
+      console.log("Waiting for server manager...");
+    }
+
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+
+  throw new Error("Server manager unavailable");
+}
+const SERVER_HOST_DOMAIN = process.env.SERVER_HOST_DOMAIN || "localhost";
 
 const createRoom = async (_: Request, res: Response) => {
   let code: string;
@@ -28,7 +46,7 @@ const createRoom = async (_: Request, res: Response) => {
 
   try {
     // Get assigned a server
-    const response = await fetch(`${serverManager}/assign`);
+    const response = await fetchWithRetry(`${serverManager}/assign`);
 
     // Validate response
     if (
