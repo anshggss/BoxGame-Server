@@ -69,10 +69,7 @@ const createRoom = async (_: Request, res: Response) => {
     roomMaps[code] = roomInfo;
 
     // Set cookies – must be SameSite=None; Secure for cross-site delivery
-    res.cookie("hostIp", roomInfo.hostIp, COOKIE_OPTS);
-    res.cookie("port", roomInfo.port, COOKIE_OPTS);
-    res.cookie("roomID", code, COOKIE_OPTS);
-    res.status(200).send("Here have your server");
+    res.json({ hostIp: roomInfo.hostIp, port: roomInfo.port, roomID: code });
   } catch (e) {
     console.error(e);
     res.status(400).send("Bad request");

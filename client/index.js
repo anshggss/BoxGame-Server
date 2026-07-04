@@ -60,27 +60,20 @@ createRoomBtn.addEventListener("click", async () => {
     // Gateway picks the least-loaded game server, sets cookies
     // (hostIp, port, roomID) and returns.
     const res = await fetch(`${GATEWAY_URL}/createRoom`, {
-      credentials: "include", // receive the Set-Cookie headers
+      credentials: "include",
     });
-
     if (!res.ok) {
       showLobbyError("No game servers available. Try again.");
       setLobbyLoading(false);
       return;
     }
-
-    // Read the cookies the gateway just set
-    const hostIp = getCookie("hostIp");
-    const port = getCookie("port");
-    const roomID = getCookie("roomID");
+    const { hostIp, port, roomID } = await res.json();
     console.log(`hostIp: ${hostIp}, port: ${port}`);
-
     if (!hostIp || !port || !roomID) {
       showLobbyError("Server response missing. Try again.");
       setLobbyLoading(false);
       return;
     }
-
     // Connect socket directly to the assigned game-server via TLS in prod
     connectSocket(`${WS_SCHEME}://${hostIp}:${port}`, () => {
       socket.emit("createRoom", pName, roomID, (ack) => {

@@ -638,17 +638,18 @@ app.get("/status", (req: Request, res: Response) => {
 // In local dev, PORT_MIN / PORT_MAX are unset → falls back to listen(0).
 const PORT_MIN = process.env.PORT_MIN ? parseInt(process.env.PORT_MIN) : 0;
 const PORT_MAX = process.env.PORT_MAX ? parseInt(process.env.PORT_MAX) : 0;
+const PUBLIC_PORT_OFFSET = 10000; // internal port = public port + offset
 
 function pickPort(): number {
-  if (!PORT_MIN || !PORT_MAX) return 0; // let OS pick (local dev)
-  return PORT_MIN + Math.floor(Math.random() * (PORT_MAX - PORT_MIN + 1));
+  if (!PORT_MIN || !PORT_MAX) return 0;
+  const publicPort =
+    PORT_MIN + Math.floor(Math.random() * (PORT_MAX - PORT_MIN + 1));
+  return publicPort + PUBLIC_PORT_OFFSET; // bind on the internal, offset port
 }
-
 async function startOnPort(port: number, retries = 20): Promise<void> {
   return new Promise((resolve, reject) => {
     server.once("error", async (err: NodeJS.ErrnoException) => {
       if (err.code === "EADDRINUSE" && retries > 0) {
-        // Port taken – try another one in the range
         server.removeAllListeners("error");
         const next = pickPort();
         console.warn(`Port ${port} in use, trying ${next}…`);
@@ -659,19 +660,20 @@ async function startOnPort(port: number, retries = 20): Promise<void> {
         reject(err);
       }
     });
-    server.listen(port, resolve);
+    server.listen(port, "127.0.0.1", resolve); // <-- bind loopback only
   });
 }
 startOnPort(pickPort())
   .then(async () => {
     const address = server.address() as AddressInfo;
+    const publicPort =
+      PORT_MIN && PORT_MAX ? address.port - PUBLIC_PORT_OFFSET : address.port;
 
     const serverInfo = {
       hostIp: process.env.HOST_IP,
-      port: address.port,
+      port: publicPort, // <-- report the public-facing port, clients/nginx use this
       connections: 0,
     };
-
     while (true) {
       try {
         console.log("SERVER_MANAGER_URL =", process.env.SERVER_MANAGER_URL);
