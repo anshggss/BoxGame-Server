@@ -65,7 +65,9 @@ createRoomBtn.addEventListener("click", async () => {
       setLobbyLoading(false);
       return;
     }
+    console.log("Logging res:");
     console.log(res);
+    console.log("Logging hostIp and port");
     const { hostIp, port, roomID } = await res.json();
     console.log(`hostIp: ${hostIp}, port: ${port}`);
     if (!hostIp || !port || !roomID) {
