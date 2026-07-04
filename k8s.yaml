@@ -176,7 +176,7 @@ spec:
               value: "3000"
             # Talk to server-manager inside the cluster
             - name: SERVER_MANAGER_URL
-              value: "http://server-manager-svc.box-game.svc.cluster.local:4689"
+              value: "http://10.99.57.238:4689"
             # Origin allowed by CORS – must match the Vercel deployment URL.
             # Update this to your exact Vercel URL after first deploy.
             - name: ALLOWED_ORIGIN
@@ -334,7 +334,7 @@ spec:
                 fieldRef:
                   fieldPath: status.hostIP
             - name: SERVER_MANAGER_URL
-              value: "http://server-manager-svc.box-game.svc.cluster.local:4689"
+              value: "http://10.99.57.238:4689"
             - name: PORT_MIN
               value: "30000"
             - name: PORT_MAX
