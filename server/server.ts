@@ -638,13 +638,12 @@ app.get("/status", (req: Request, res: Response) => {
 // In local dev, PORT_MIN / PORT_MAX are unset → falls back to listen(0).
 const PORT_MIN = process.env.PORT_MIN ? parseInt(process.env.PORT_MIN) : 0;
 const PORT_MAX = process.env.PORT_MAX ? parseInt(process.env.PORT_MAX) : 0;
-const PUBLIC_PORT_OFFSET = 10000; // internal port = public port + offset
 
 function pickPort(): number {
   if (!PORT_MIN || !PORT_MAX) return 0;
   const publicPort =
     PORT_MIN + Math.floor(Math.random() * (PORT_MAX - PORT_MIN + 1));
-  return publicPort + PUBLIC_PORT_OFFSET; // bind on the internal, offset port
+  return publicPort; // bind on the internal, offset port
 }
 async function startOnPort(port: number, retries = 20): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -666,8 +665,7 @@ async function startOnPort(port: number, retries = 20): Promise<void> {
 startOnPort(pickPort())
   .then(async () => {
     const address = server.address() as AddressInfo;
-    const publicPort =
-      PORT_MIN && PORT_MAX ? address.port - PUBLIC_PORT_OFFSET : address.port;
+    const publicPort = address.port;
 
     const serverInfo = {
       hostIp: process.env.HOST_IP,

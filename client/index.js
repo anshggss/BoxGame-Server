@@ -121,6 +121,7 @@ joinRoomBtn.addEventListener("click", async () => {
     }
 
     const { hostIp, port, roomID } = await res.json();
+    console.log(hostIp);
 
     if (!hostIp || !port || !roomID) {
       showLobbyError("Could not locate room server.");
@@ -129,7 +130,7 @@ joinRoomBtn.addEventListener("click", async () => {
     }
 
     connectSocket(`${WS_SCHEME}://${hostIp}:${port}`, () => {
-      socket.emit("joinRoom", { name: pName, code }, (ack) => {
+      socket.emit("joinRoom", { name: pName, roomID }, (ack) => {
         setLobbyLoading(false);
         if (ack && ack.success) {
           enterGame(ack.code);

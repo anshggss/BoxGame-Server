@@ -57,11 +57,20 @@ const createRoom = async (_: Request, res: Response) => {
       return;
     }
 
+    // Port mapping: server-manager returns the INTERNAL pod port (30000–31000).
+    // The client must connect to the EXTERNAL nginx TLS port (20000–21000).
+    // nginx listens on EXT_PORT and proxy_passes to EXT_PORT + 10000 (INT_PORT).
+    // So: externalPort = internalPort - 10000.
+    // See: nginx-gameserver-stream.conf and scripts/gen-stream-ports.sh.
+    const INTERNAL_TO_EXTERNAL_OFFSET = 10000;
+    const internalPort = Number(response.headers.get("port"));
+    const externalPort = internalPort - INTERNAL_TO_EXTERNAL_OFFSET;
+
     const roomInfo = {
-      // Store raw hostIp internally for reference, but tell the client to use
-      // the public domain so TLS (wss://) works from the browser.
+      // Always use the public domain — the raw pod IP (hostNetwork) is
+      // not reachable from the browser.
       hostIp: SERVER_HOST_DOMAIN,
-      port: Number(response.headers.get("port")),
+      port: externalPort, // external TLS port (20000–21000) — what clients dial
     };
 
     // Add roominfo in the map
