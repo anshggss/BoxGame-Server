@@ -15,28 +15,72 @@
 
     <!-- ===== LOBBY SCREEN ===== -->
     <div id="nameScreen">
-        <div class="nameBox" id="lobbyBox">
-            <h2>Box Game</h2>
-            <p>Jump, collect hearts, beat your friends.</p>
+        <div class="landing-container">
 
-            <label class="field-label">Your Name</label>
-            <input type="text" id="nameInput" placeholder="Enter your name…" maxlength="15" autofocus />
+            <section class="hero">
 
-            <div class="divider"><span>choose a room</span></div>
+                <span class="hero-tag">MULTIPLAYER PLATFORMER</span>
 
-            <!-- Create Room -->
-            <button id="createRoomBtn" class="btn-primary">✦ Create Private Room</button>
+                <h1>BOX GAME</h1>
 
-            <!-- Join Room -->
-            <div class="join-row">
-                <input type="text" id="roomCodeInput" placeholder="Room code…" maxlength="5" />
-                <button id="joinRoomBtn" class="btn-secondary">Join</button>
+                <p class="hero-description">
+                    Jump across platforms, collect points, compete with your friends,
+                    and top the leaderboard.
+                </p>
+
+                <!-- <div class="hero-features"> -->
+                <!--     <div class="feature"> -->
+                <!--         <span>⚡</span> -->
+                <!--         <p>Low Latency</p> -->
+                <!--     </div> -->
+                <!---->
+                <!--     <div class="feature"> -->
+                <!--         <span>❤</span> -->
+                <!--         <p>Collect Hearts</p> -->
+                <!--     </div> -->
+                <!---->
+                <!--     <div class="feature"> -->
+                <!--         <span>👥</span> -->
+                <!--         <p>Private Rooms</p> -->
+                <!--     </div> -->
+                <!-- </div> -->
+
+            </section>
+
+            <div class="nameBox" id="lobbyBox">
+
+                <h2>Play Now</h2>
+
+                <p>Enter your name and join a room.</p>
+
+                <label class="field-label">Player Name</label>
+
+                <input type="text" id="nameInput" maxlength="15" placeholder="Player name">
+
+                <button id="createRoomBtn" class="btn-primary">
+                    Create Private Room
+                </button>
+
+                <div class="divider">
+                    <span>OR</span>
+                </div>
+
+                <div class="join-row">
+
+                    <input id="roomCodeInput" maxlength="5" placeholder="ABCDE">
+
+                    <button id="joinRoomBtn" class="btn-secondary">
+                        Join
+                    </button>
+
+                </div>
+
+                <p id="lobbyError" class="error-msg"></p>
+
             </div>
 
-            <p id="lobbyError" class="error-msg"></p>
         </div>
     </div>
-
     <!-- ===== IN-GAME HUD ===== -->
     <div id="hud" style="display:none;">
         <button id="menuBtn" title="Options">☰</button>
